@@ -183,6 +183,11 @@ public class MQTTTransport implements Transport {
                     "Broker URL",
                     "tcp://localhost:1883",
                     "This is the URL of the MQTT broker."));
+            
+            cr.addField(new BooleanField(CK_CLEAN_SESSION,
+                    "Clean session option",
+                    true,
+                    "session preserve setting for MQTT client/broker."));
 
             cr.addField(new BooleanField(CK_USE_AUTH,
                     "Use Authentication",
