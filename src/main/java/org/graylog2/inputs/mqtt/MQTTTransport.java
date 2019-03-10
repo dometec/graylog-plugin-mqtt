@@ -49,7 +49,9 @@ public class MQTTTransport implements Transport {
     private static final String CK_USERNAME = "username";
     private static final String CK_USE_AUTH = "useAuth";
     
-    #session clean option for MQTT protocol
+    /*
+    session clean option for MQTT protocol
+    */
     private static final boolean CK_CLEAN_SESSION = "cleanSession";
 
     private final Configuration configuration;
