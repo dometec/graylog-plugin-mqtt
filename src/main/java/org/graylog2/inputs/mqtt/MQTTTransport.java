@@ -48,6 +48,9 @@ public class MQTTTransport implements Transport {
     private static final String CK_PASSWORD = "password";
     private static final String CK_USERNAME = "username";
     private static final String CK_USE_AUTH = "useAuth";
+    
+    #session clean option for MQTT protocol
+    private static final boolean CK_CLEAN_SESSION = "cleanSession";
 
     private final Configuration configuration;
     private final MetricRegistry metricRegistry;
@@ -87,9 +90,9 @@ public class MQTTTransport implements Transport {
             if (configuration.getBoolean(CK_USE_AUTH)) {
                 final String username = configuration.getString(CK_USERNAME);
                 final String password = configuration.getString(CK_PASSWORD);
-                returnCode = client.connect(clientId, true, username, password);
+                returnCode = client.connect(clientId, CK_CLEAN_SESSION, username, password);
             } else {
-                returnCode = client.connect(clientId, true);
+                returnCode = client.connect(clientId, CK_CLEAN_SESSION);
             }
         } catch (Exception ex) {
             final String msg = "An unexpected exception has occurred.";
