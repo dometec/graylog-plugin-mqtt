@@ -52,7 +52,7 @@ public class MQTTTransport implements Transport {
     /*
     session clean option for MQTT protocol
     */
-    private static final boolean CK_CLEAN_SESSION = "cleanSession";
+    private static final String CK_CLEAN_SESSION = "cleanSession";
 
     private final Configuration configuration;
     private final MetricRegistry metricRegistry;
@@ -89,12 +89,14 @@ public class MQTTTransport implements Transport {
 
         final ConnectReturnCode returnCode;
         try {
+            /*defind clean_session option*/
+            final Boolean clean_session = BooleanUtils.toBoolean(configuration.getString(CK_CLEAN_SESSION))
             if (configuration.getBoolean(CK_USE_AUTH)) {
                 final String username = configuration.getString(CK_USERNAME);
                 final String password = configuration.getString(CK_PASSWORD);
-                returnCode = client.connect(clientId, CK_CLEAN_SESSION, username, password);
+                returnCode = client.connect(clientId, clean_session, username, password);
             } else {
-                returnCode = client.connect(clientId, CK_CLEAN_SESSION);
+                returnCode = client.connect(clientId, clean_session);
             }
         } catch (Exception ex) {
             final String msg = "An unexpected exception has occurred.";
