@@ -90,7 +90,7 @@ public class MQTTTransport implements Transport {
         final ConnectReturnCode returnCode;
         try {
             /*defind clean_session option*/
-            final Boolean clean_session = BooleanUtils.toBoolean(configuration.getString(CK_CLEAN_SESSION));
+            final Boolean clean_session = Boolean.valueOf(configuration.getString(CK_CLEAN_SESSION));
             
             if (configuration.getBoolean(CK_USE_AUTH)) {
                 final String username = configuration.getString(CK_USERNAME);
