@@ -1,24 +1,19 @@
 package org.graylog2.inputs.mqtt;
 
-import com.codahale.metrics.MetricRegistry;
-import com.codahale.metrics.MetricSet;
-import com.google.common.base.Splitter;
-import com.google.common.collect.ImmutableList;
-import com.google.common.hash.Hashing;
-import com.google.inject.assistedinject.Assisted;
-import com.google.inject.assistedinject.AssistedInject;
-import net.xenqtt.MqttCommandCancelledException;
-import net.xenqtt.MqttInterruptedException;
-import net.xenqtt.MqttInvocationError;
-import net.xenqtt.MqttInvocationException;
-import net.xenqtt.MqttTimeoutException;
-import net.xenqtt.client.MqttClient;
-import net.xenqtt.client.MqttClientConfig;
-import net.xenqtt.client.MqttClientListener;
-import net.xenqtt.client.Subscription;
-import net.xenqtt.client.SyncMqttClient;
-import net.xenqtt.message.ConnectReturnCode;
-import net.xenqtt.message.QoS;
+import static com.codahale.metrics.MetricRegistry.name;
+
+import java.nio.charset.StandardCharsets;
+
+import org.eclipse.paho.client.mqttv3.DisconnectedBufferOptions;
+import org.eclipse.paho.client.mqttv3.IMqttActionListener;
+import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
+import org.eclipse.paho.client.mqttv3.IMqttToken;
+import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
+import org.eclipse.paho.client.mqttv3.MqttCallbackExtended;
+import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
+import org.eclipse.paho.client.mqttv3.MqttException;
+import org.eclipse.paho.client.mqttv3.MqttMessage;
+import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.graylog2.plugin.ServerStatus;
 import org.graylog2.plugin.configuration.Configuration;
 import org.graylog2.plugin.configuration.ConfigurationRequest;
@@ -32,202 +27,253 @@ import org.graylog2.plugin.inputs.annotations.ConfigClass;
 import org.graylog2.plugin.inputs.annotations.FactoryClass;
 import org.graylog2.plugin.inputs.codecs.CodecAggregator;
 import org.graylog2.plugin.inputs.transports.Transport;
+import org.graylog2.plugin.journal.RawMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
+import com.codahale.metrics.Meter;
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.MetricSet;
+import com.google.common.base.Splitter;
+import com.google.common.hash.Hashing;
+import com.google.inject.assistedinject.Assisted;
+import com.google.inject.assistedinject.AssistedInject;
 
-public class MQTTTransport implements Transport {
-    private final Logger LOG = LoggerFactory.getLogger(MQTTTransport.class);
+public class MQTTTransport implements Transport, MqttCallbackExtended, IMqttActionListener {
 
-    private static final String CK_BROKER_URL = "brokerUrl";
-    private static final String CK_THREADS = "threads";
-    private static final String CK_TOPICS = "topics";
-    private static final String CK_TIMEOUT = "timeout";
-    private static final String CK_KEEPALIVE = "keepalive";
-    private static final String CK_PASSWORD = "password";
-    private static final String CK_USERNAME = "username";
-    private static final String CK_USE_AUTH = "useAuth";
-    
-    /*
-    session clean option for MQTT protocol
-    */
-    private static final String CK_CLEAN_SESSION = "cleanSession";
+	private final Logger logger = LoggerFactory.getLogger(MQTTTransport.class);
 
-    private final Configuration configuration;
-    private final MetricRegistry metricRegistry;
-    private final String clientId;
-    private ServerStatus serverStatus;
-    private MqttClient client;
-    private List<String> topics;
+	private static final String CK_BROKER_URL = "brokerUrl";
+	private static final String CK_TOPICS = "topics";
+	private static final String CK_TIMEOUT = "timeout";
+	private static final String CK_KEEPALIVE = "keepalive";
+	private static final String CK_PASSWORD = "password";
+	private static final String CK_USERNAME = "username";
+	private static final String CK_USE_AUTH = "useAuth";
+	private static final String CK_CLIENTID = "clientId";
+	private static final String CK_CLEAN_SESSION = "cleanSession";
 
+	private final Configuration configuration;
+	private final MetricRegistry metricRegistry;
+	private ServerStatus serverStatus;
+	private MqttAsyncClient client;
 
-    @AssistedInject
-    public MQTTTransport(@Assisted Configuration configuration,
-                         MetricRegistry metricRegistry,
-                         ServerStatus serverStatus) {
-        this.configuration = configuration;
-        this.metricRegistry = metricRegistry;
-        this.serverStatus = serverStatus;
-        this.clientId = "graylog2_" + Hashing.murmur3_32().hashUnencodedChars(this.serverStatus.getNodeId().toString()).toString();
-    }
+	private MessageInput messageInput;
 
-    @Override
-    public void setMessageAggregator(CodecAggregator codecAggregator) {
+	private Meter incomingMessages;
+	private Meter incompleteMessages;
+	private Meter processedMessages;
 
-    }
+	@AssistedInject
+	public MQTTTransport(@Assisted Configuration configuration, MetricRegistry metricRegistry, ServerStatus serverStatus) {
+		this.configuration = configuration;
+		this.metricRegistry = metricRegistry;
+		this.serverStatus = serverStatus;
+	}
 
-    @Override
-    public void launch(MessageInput messageInput) throws MisfireException {
-        if (topics == null) {
-            topics = buildTopicList();
-        }
+	@Override
+	public void setMessageAggregator(CodecAggregator codecAggregator) {
+	}
 
-        final ClientListener listener = new ClientListener(messageInput, buildSubscriptions(), metricRegistry);
+	@Override
+	public void launch(MessageInput messageInput) throws MisfireException {
 
-        client = buildClient(listener);
+		this.messageInput = messageInput;
+		final String metricName = messageInput.getUniqueReadableId();
 
-        final ConnectReturnCode returnCode;
-        try {
-            /*defind clean_session option*/
-            final Boolean clean_session = Boolean.valueOf(configuration.getString(CK_CLEAN_SESSION));
-            
-            if (configuration.getBoolean(CK_USE_AUTH)) {
-                final String username = configuration.getString(CK_USERNAME);
-                final String password = configuration.getString(CK_PASSWORD);
-                returnCode = client.connect(clientId, clean_session, username, password);
-            } else {
-                returnCode = client.connect(clientId, clean_session);
-            }
-        } catch (Exception ex) {
-            final String msg = "An unexpected exception has occurred.";
-            LOG.error(msg, ex);
-            throw new MisfireException(msg, ex);
-        }
+		this.incomingMessages = metricRegistry.meter(name(metricName, "incomingMessages"));
+		this.incompleteMessages = metricRegistry.meter(name(metricName, "incompleteMessages"));
+		this.processedMessages = metricRegistry.meter(name(metricName, "processedMessages"));
 
-        if (returnCode != null && returnCode != ConnectReturnCode.ACCEPTED) {
-            final String errorMsg = "Unable to connect to the MQTT broker. Reason: " + returnCode;
-            LOG.error(errorMsg);
-            throw new MisfireException(errorMsg);
-        }
+		final String clientId = configuration.getString(CK_USE_AUTH,
+				"graylog_" + Hashing.murmur3_32().hashUnencodedChars(this.serverStatus.getNodeId().toString()).toString());
 
-        listener.connected(client, returnCode);
-    }
+		MqttConnectOptions connOpts = new MqttConnectOptions();
+		connOpts.setCleanSession(Boolean.valueOf(configuration.getString(CK_CLEAN_SESSION)));
+		connOpts.setAutomaticReconnect(true);
+		connOpts.setKeepAliveInterval(configuration.getInt(CK_KEEPALIVE));
+		connOpts.setConnectionTimeout(configuration.getInt(CK_TIMEOUT));
+		connOpts.setMaxInflight(1250);
+		if (configuration.getBoolean(CK_USE_AUTH)) {
+			connOpts.setUserName(configuration.getString(CK_USERNAME));
+			connOpts.setPassword(configuration.getString(CK_PASSWORD).toCharArray());
+		} else {
+			connOpts.setUserName(clientId);
+		}
 
-    private List<Subscription> buildSubscriptions() {
-        final ImmutableList.Builder<Subscription> subscriptions = ImmutableList.builder();
-        for (String topic : topics) {
-            subscriptions.add(new Subscription(topic, QoS.AT_LEAST_ONCE));
-        }
+		DisconnectedBufferOptions bufferOpts = new DisconnectedBufferOptions();
+		bufferOpts.setBufferEnabled(true);
+		bufferOpts.setBufferSize(250000);
+		bufferOpts.setDeleteOldestMessages(true);
+		bufferOpts.setPersistBuffer(false);
 
-        return subscriptions.build();
-    }
+		try {
 
-    private MqttClient buildClient(MqttClientListener listener) {
-        final String brokerUrl = configuration.getString(CK_BROKER_URL);
-        final int threadPoolSize = configuration.getInt(CK_THREADS);
+			client = new MqttAsyncClient(configuration.getString(CK_BROKER_URL), clientId, new MemoryPersistence());
 
-        return new SyncMqttClient(brokerUrl, listener, threadPoolSize, buildClientConfiguration());
-    }
+			client.setBufferOpts(bufferOpts);
+			client.setCallback(this);
+			client.connect(connOpts, null, this);
 
-    private List<String> buildTopicList() {
-        final Iterable<String> topicIterable = Splitter.on(',')
-                .omitEmptyStrings()
-                .trimResults()
-                .split(configuration.getString(CK_TOPICS));
-        return ImmutableList.copyOf(topicIterable);
-    }
+		} catch (Exception e) {
+			logger.error("Can't connect to MQTT Broker.", e);
+			throw new MisfireException(e);
+		}
 
-    private MqttClientConfig buildClientConfiguration() {
-        return new MqttClientConfig()
-                .setConnectTimeoutSeconds(configuration.getInt(CK_TIMEOUT))
-                .setKeepAliveSeconds(configuration.getInt(CK_KEEPALIVE));
-    }
+	}
 
-    @Override
-    public void stop() {
-        if (client != null && !client.isClosed()) {
-            try {
-                //client.unsubscribe(topics);
-                client.disconnect();
-            } catch (MqttCommandCancelledException | MqttTimeoutException | MqttInterruptedException | MqttInvocationException | MqttInvocationError e) {
-                LOG.warn("Unable to do a clean disconnect from broker: ", e);
-                if (!client.isClosed())
-                    client.close();
-            }
-        }
-    }
+	@Override
+	public void onSuccess(IMqttToken iMqttToken) {
+		logger.debug("OnSuccess to MQTT Broker: {}.", iMqttToken);
+	}
 
+	@Override
+	public void onFailure(IMqttToken iMqttToken, Throwable throwable) {
+		logger.error("Can't connect to MQTT Broker.", throwable);
+	}
 
-    @Override
-    public MetricSet getMetricSet() {
-        return null;
-    }
+	@Override
+	public void connectComplete(boolean reconnect, String serverURI) {
 
-    @FactoryClass
-    public interface Factory extends Transport.Factory<MQTTTransport> {
-        @Override
-        MQTTTransport create(Configuration configuration);
+		if (reconnect) {
+			logger.info("Reconnected to: {}.", serverURI);
+		} else {
+			logger.info("Initial connection to: {}.", serverURI);
+		}
 
-        @Override
-        Config getConfig();
-    }
+		new Thread(this::subscribeToTopic).start();
+	}
 
-    @ConfigClass
-    public static class Config implements Transport.Config {
-        @Override
-        public ConfigurationRequest getRequestedConfiguration() {
-            final ConfigurationRequest cr = new ConfigurationRequest();
+	private void subscribeToTopic() {
 
-            cr.addField(new TextField(CK_BROKER_URL,
-                    "Broker URL",
-                    "tcp://localhost:1883",
-                    "This is the URL of the MQTT broker."));
-            
-            cr.addField(new BooleanField(CK_CLEAN_SESSION,
-                    "Clean session option",
-                    true,
-                    "session preserve setting for MQTT client/broker."));
+		while (true) {
 
-            cr.addField(new BooleanField(CK_USE_AUTH,
-                    "Use Authentication",
-                    false,
-                    "This is the username for connecting to the MQTT broker."));
+			try {
 
-            cr.addField(new TextField(CK_USERNAME,
-                    "Username",
-                    "",
-                    "This is the username for connecting to the MQTT broker.",
-                    ConfigurationField.Optional.OPTIONAL));
+				Iterable<String> topics = Splitter.on(',').omitEmptyStrings().trimResults().split(configuration.getString(CK_TOPICS));
 
-            cr.addField(new TextField(CK_PASSWORD,
-                    "Password",
-                    "",
-                    "This is the password for connecting to the MQTT broker.",
-                    ConfigurationField.Optional.OPTIONAL,
-                    TextField.Attribute.IS_PASSWORD));
+				for (String topic : topics) {
+					logger.info("Subscription to topic {} ...", topic);
+					client.subscribe(topic, 0);
+				}
 
-            cr.addField(new TextField(CK_TOPICS,
-                    "Topic Names",
-                    "cluster/system/logs",
-                    "The comma-separated list of topics you are subscribing to."));
+				logger.info("Subscribed.");
 
-            cr.addField(new NumberField(CK_THREADS,
-                    "Thread pool size",
-                    5,
-                    "Number of threads to use for message processing"));
+				break;
 
-            cr.addField(new NumberField(CK_TIMEOUT,
-                    "Connection timeout",
-                    30,
-                    "Amount of seconds to wait for connections"));
+			} catch (MqttException e) {
+				logger.error("Can't subscribe to MQTT broker topic. Retry...", e);
+			}
 
-            cr.addField(new NumberField(CK_KEEPALIVE,
-                    "Keep-alive interval",
-                    300,
-                    "Maximum amount of seconds to wait before sending keep-alive message"));
+			try {
+				Thread.sleep(10_000);
+			} catch (InterruptedException e1) {
+				logger.error("Interrupted Exception", e1);
+				Thread.currentThread().interrupt();
+			}
+		}
 
-            return cr;
-        }
-    }
+	}
+
+	@Override
+	public void stop() {
+
+		logger.info("Stopping of {}.", this.getClass().getName());
+
+		if (!client.isConnected())
+			return;
+
+		try {
+			client.disconnect();
+			logger.info("Disconnected form MQTT Broker.");
+		} catch (MqttException e) {
+			logger.error("Error disconnecting from broker.", e);
+		}
+
+	}
+
+	@Override
+	public void connectionLost(Throwable throwable) {
+		logger.error("ConnectionLost to MQTT Broker.", throwable);
+	}
+
+	@Override
+	public void messageArrived(String topic, MqttMessage message) {
+		logger.debug("Received message on {}: {}.", topic, message);
+		incomingMessages.mark();
+
+		if (message.getPayload().length == 0) {
+			logger.debug("Received message is empty. Not processing.");
+			incompleteMessages.mark();
+			return;
+		}
+
+		if (message.isDuplicate()) {
+			logger.debug("Received message is a duplicate. Not processing.");
+			incompleteMessages.mark();
+			return;
+		}
+
+		String mess = topic + "|" + new String(message.getPayload(), StandardCharsets.UTF_8);
+
+		RawMessage rawMessage = new RawMessage(mess.getBytes(StandardCharsets.UTF_8));
+
+		logger.debug("Parsed message successfully, message id: <{}>.", rawMessage.getId());
+		messageInput.processRawMessage(rawMessage);
+
+		processedMessages.mark();
+	}
+
+	@Override
+	public void deliveryComplete(IMqttDeliveryToken token) {
+		logger.trace("Delivery complete to MQTT Broker: {}/{}.", token.getTopics(), token.getMessageId());
+	}
+
+	@Override
+	public MetricSet getMetricSet() {
+		return null;
+	}
+
+	@FactoryClass
+	public interface Factory extends Transport.Factory<MQTTTransport> {
+		@Override
+		MQTTTransport create(Configuration configuration);
+
+		@Override
+		Config getConfig();
+	}
+
+	@ConfigClass
+	public static class Config implements Transport.Config {
+		@Override
+		public ConfigurationRequest getRequestedConfiguration() {
+			final ConfigurationRequest cr = new ConfigurationRequest();
+
+			cr.addField(new TextField(CK_BROKER_URL, "Broker URL", "tcp://localhost:1883", "This is the URL of the MQTT broker."));
+
+			cr.addField(
+					new BooleanField(CK_CLEAN_SESSION, "Clean session option", true, "session preserve setting for MQTT client/broker."));
+
+			cr.addField(
+					new BooleanField(CK_USE_AUTH, "Use Authentication", false, "This is the username for connecting to the MQTT broker."));
+
+			cr.addField(new TextField(CK_USERNAME, "Username", "", "This is the username for connecting to the MQTT broker.",
+					ConfigurationField.Optional.OPTIONAL));
+
+			cr.addField(new TextField(CK_PASSWORD, "Password", "", "This is the password for connecting to the MQTT broker.",
+					ConfigurationField.Optional.OPTIONAL, TextField.Attribute.IS_PASSWORD));
+
+			cr.addField(new TextField(CK_TOPICS, "Topic Names", "cluster/system/logs",
+					"The comma-separated list of topics you are subscribing to (+ and # allowed)."));
+
+			cr.addField(new TextField(CK_CLIENTID, "Cluent ID", "", "The ClientId of client."));
+
+			cr.addField(new NumberField(CK_TIMEOUT, "Connection timeout", 30, "Amount of seconds to wait for connections"));
+
+			cr.addField(new NumberField(CK_KEEPALIVE, "Keep-alive interval", 30,
+					"Maximum amount of seconds to wait before sending keep-alive message"));
+
+			return cr;
+		}
+	}
 }

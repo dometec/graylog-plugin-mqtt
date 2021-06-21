@@ -10,13 +10,15 @@ import java.util.Collection;
 
 @AutoService(Plugin.class)
 public class MQTTInputPlugin implements Plugin {
-    @Override
-    public PluginMetaData metadata() {
-        return new MQTTInputMetadata();
-    }
 
-    @Override
-    public Collection<PluginModule> modules() {
-        return ImmutableSet.<PluginModule>of(new MQTTInputModule());
-    }
+	@Override
+	public PluginMetaData metadata() {
+		return new MQTTInputMetadata();
+	}
+
+	@Override
+	public Collection<PluginModule> modules() {
+		return ImmutableSet.<PluginModule> of(new MQTTInputModule());
+	}
+
 }

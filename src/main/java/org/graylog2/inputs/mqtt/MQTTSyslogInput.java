@@ -12,41 +12,48 @@ import org.graylog2.plugin.inputs.MessageInput;
 import javax.inject.Inject;
 
 public class MQTTSyslogInput extends MessageInput {
-    private static final String NAME = "MQTT TCP (Syslog)";
 
-    @AssistedInject
-    public MQTTSyslogInput(final MetricRegistry metricRegistry,
-                           @Assisted Configuration configuration,
-                           MQTTTransport.Factory mqttTransportFactory,
-                           SyslogCodec.Factory syslogCodecFactory,
-                           LocalMetricRegistry localRegistry,
-                           Config config,
-                           Descriptor descriptor, ServerStatus serverStatus) {
-        super(metricRegistry, configuration, mqttTransportFactory.create(configuration), localRegistry, syslogCodecFactory.create(configuration), config, descriptor, serverStatus);
-    }
+	private static final String NAME = "MQTT TCP (Syslog)";
 
-    public interface Factory extends MessageInput.Factory<MQTTSyslogInput> {
-        @Override
-        MQTTSyslogInput create(Configuration configuration);
+	@AssistedInject
+	public MQTTSyslogInput(final MetricRegistry metricRegistry, @Assisted Configuration configuration,
+			MQTTTransport.Factory mqttTransportFactory, SyslogCodec.Factory syslogCodecFactory, LocalMetricRegistry localRegistry,
+			Config config, Descriptor descriptor, ServerStatus serverStatus) {
 
-        @Override
-        Config getConfig();
+		super(metricRegistry, configuration, mqttTransportFactory.create(configuration), localRegistry,
+				syslogCodecFactory.create(configuration), config, descriptor, serverStatus);
 
-        @Override
-        Descriptor getDescriptor();
-    }
+	}
 
-    public static class Descriptor extends MessageInput.Descriptor {
-        @Inject
-        public Descriptor() {
-            super(NAME, false, "https://github.com/graylog-labs/graylog-plugin-mqtt");
-        }
-    }
+	public interface Factory extends MessageInput.Factory<MQTTSyslogInput> {
 
-    public static class Config extends MessageInput.Config {
-        @Inject
-        public Config(MQTTTransport.Factory transport, SyslogCodec.Factory codec) {
-            super(transport.getConfig(), codec.getConfig());
-        }
-    }
+		@Override
+		MQTTSyslogInput create(Configuration configuration);
+
+		@Override
+		Config getConfig();
+
+		@Override
+		Descriptor getDescriptor();
+
+	}
+
+	public static class Descriptor extends MessageInput.Descriptor {
+
+		@Inject
+		public Descriptor() {
+			super(NAME, false, "https://github.com/dometec/graylog-plugin-mqtt");
+		}
+
+	}
+
+	public static class Config extends MessageInput.Config {
+
+		@Inject
+		public Config(MQTTTransport.Factory transport, SyslogCodec.Factory codec) {
+			super(transport.getConfig(), codec.getConfig());
+		}
+
+	}
+
 }
