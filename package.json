@@ -1,0 +1,28 @@
+{
+  "name": "MQTTInput",
+  "version": "1.0.0-SNAPSHOT",
+  "description": "",
+  "repository": {
+    "type": "git",
+    "url": "dometec/graylog-plugin-mqtt.git"
+  },
+  "scripts": {
+    "build": "webpack",
+    "lint": "eslint src",
+    "lint:path": "eslint",
+    "test": "jest"
+  },
+  "keywords": [
+    "graylog"
+  ],
+  "author": "Domenico Briganti <domenico.briganti@osys.it>",
+  "license": "MIT",
+  "eslintConfig": {
+    "extends": "graylog"
+  },
+  "dependencies": {
+  },
+  "devDependencies": {
+    "graylog-web-plugin": "file:../graylog-project-repos/graylog2-server/graylog2-web-interface/packages/graylog-web-plugin"
+  }
+}
