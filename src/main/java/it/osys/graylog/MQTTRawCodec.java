@@ -1,9 +1,7 @@
 package it.osys.graylog;
 
 import java.util.HashMap;
-
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
+import java.util.Map;
 
 import org.apache.commons.lang3.SerializationUtils;
 import org.graylog2.plugin.Message;
@@ -32,10 +30,9 @@ public class MQTTRawCodec extends AbstractCodec {
 		this.messageFactory = messageFactory;
 	}
 
-	@Nullable
 	@Override
 	@SuppressWarnings("unchecked")
-	public Message decode(@Nonnull final RawMessage rawMessage) {
+	public Message decode(final RawMessage rawMessage) {
 
 		HashMap<String, Object> m = (HashMap<String, Object>) SerializationUtils.deserialize(rawMessage.getPayload());
 
@@ -46,7 +43,31 @@ public class MQTTRawCodec extends AbstractCodec {
 		message.addField("duplicate", m.get("duplicate"));
 		message.addField("retained", m.get("retained"));
 
+		// MQTT 5.0 properties
+		addIfPresent(message, m, "mqtt5_payload_format_indicator");
+		addIfPresent(message, m, "mqtt5_message_expiry_interval");
+		addIfPresent(message, m, "mqtt5_topic_alias");
+		addIfPresent(message, m, "mqtt5_response_topic");
+		addIfPresent(message, m, "mqtt5_correlation_data");
+		addIfPresent(message, m, "mqtt5_content_type");
+		addIfPresent(message, m, "mqtt5_subscription_identifier");
+
+		// User properties: stored as a nested map, flattened to individual fields
+		Object userProps = m.get("mqtt5_user_properties");
+		if (userProps instanceof Map<?, ?> userPropsMap) {
+			for (Map.Entry<?, ?> entry : userPropsMap.entrySet()) {
+				message.addField("mqtt5_user_" + entry.getKey(), entry.getValue());
+			}
+		}
+
 		return message;
+	}
+
+	private void addIfPresent(Message message, HashMap<String, Object> m, String key) {
+		Object value = m.get(key);
+		if (value != null) {
+			message.addField(key, value);
+		}
 	}
 
 	@FactoryClass
