@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.commons.lang3.SerializationUtils;
 import org.graylog2.plugin.Message;
@@ -44,6 +45,9 @@ public class MQTTRawCodec extends AbstractCodec {
 
 	static final String CK_PROTOBUF_SCHEMA = "protobuf_schema";
 	static final String CK_PROTOBUF_TOPIC_CONFIG = "protobuf_topic_config";
+
+	/** Compiled descriptors keyed by schema text, shared across codec instances (compile each schema once). */
+	private static final Map<String, Map<String, Descriptors.Descriptor>> SCHEMA_CACHE = new ConcurrentHashMap<>();
 
 	private final Configuration configuration;
 	private final MessageFactory messageFactory;
@@ -271,8 +275,22 @@ public class MQTTRawCodec extends AbstractCodec {
 		}
 	}
 
-	/** Compiles pasted .proto text into an index of message descriptors keyed by fully-qualified name. */
+	/**
+	 * Compiles pasted .proto text into an index of message descriptors keyed by fully-qualified name.
+	 * Results are cached per unique schema text so each distinct schema invokes protoc at most once per
+	 * JVM (descriptors are immutable, so the cache is shared safely across codec instances and inputs).
+	 */
 	static Map<String, Descriptors.Descriptor> compileSchema(String schemaText) throws Exception {
+		Map<String, Descriptors.Descriptor> cached = SCHEMA_CACHE.get(schemaText);
+		if (cached != null) {
+			return cached;
+		}
+		Map<String, Descriptors.Descriptor> compiled = compileSchemaUncached(schemaText);
+		Map<String, Descriptors.Descriptor> existing = SCHEMA_CACHE.putIfAbsent(schemaText, compiled);
+		return existing != null ? existing : compiled;
+	}
+
+	private static Map<String, Descriptors.Descriptor> compileSchemaUncached(String schemaText) throws Exception {
 		File baseTmp = new File(System.getProperty("java.io.tmpdir"));
 		File tmpDir = Files.createTempDirectory(baseTmp.toPath(), "graylog-mqtt-proto").toFile();
 		File protoFile = new File(tmpDir, "schema.proto");
