@@ -200,6 +200,8 @@ public class MQTTTransport implements Transport {
 		Buffer payload = message.payload();
 		m.put("payload",
 				payload == null || payload.length() == 0 ? "" : payload.toString(StandardCharsets.UTF_8));
+		// Raw bytes preserved for binary-safe decoding (e.g. protobuf) in the codec.
+		m.put("payloadBytes", payload == null ? null : payload.getBytes());
 		m.put("topic", message.topicName());
 		m.put("qos", message.qosLevel().value());
 		m.put("duplicate", message.isDup());

@@ -32,7 +32,7 @@
 
 	<groupId>it.osys.graylog</groupId>
 	<artifactId>graylog-plugin-mqtt</artifactId>
-	<version>4.0.0</version>
+	<version>4.1.0</version>
 	<packaging>jar</packaging>
 
 	<name>${project.artifactId}</name>
@@ -137,6 +137,22 @@
 			<version>3.17.0</version>
 		</dependency>
 
+		<!-- Protobuf runtime decoding: Descriptors, DynamicMessage, TextFormat.
+		     Compile scope so the shade plugin bundles it (Graylog does not provide protobuf). -->
+		<dependency>
+			<groupId>com.google.protobuf</groupId>
+			<artifactId>protobuf-java</artifactId>
+			<version>3.25.5</version>
+		</dependency>
+
+		<!-- Compiles user-pasted .proto text into a FileDescriptorSet at runtime by
+		     extracting and running a bundled protoc binary. -->
+		<dependency>
+			<groupId>com.github.os72</groupId>
+			<artifactId>protoc-jar</artifactId>
+			<version>3.11.4</version>
+		</dependency>
+
 		<dependency>
 			<groupId>com.google.auto.service</groupId>
 			<artifactId>auto-service</artifactId>
@@ -196,12 +212,17 @@
 			<scope>provided</scope>
 		</dependency>
 
-		<!-- Include source from test-jar to reuse test classes. -->
 		<dependency>
-			<groupId>org.graylog2</groupId>
-			<artifactId>graylog2-server</artifactId>
-			<version>${graylog.version}</version>
-			<type>test-jar</type>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!-- Not used directly, but the parent's surefire argLine references the
+		     mockito-core jar as a -javaagent; this makes that path resolve. -->
+		<dependency>
+			<groupId>org.mockito</groupId>
+			<artifactId>mockito-core</artifactId>
 			<scope>test</scope>
 		</dependency>
 
@@ -291,6 +312,18 @@
 								<transformer
 									implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer" />
 							</transformers>
+								<filters>
+									<!-- protoc-jar bundles protoc binaries for many versions; we only run the
+									     embedded default (3.11.4). Drop the legacy versions to slim the jar. -->
+									<filter>
+										<artifact>com.github.os72:protoc-jar</artifact>
+										<excludes>
+											<exclude>bin/2.4.1/**</exclude>
+											<exclude>bin/2.5.0/**</exclude>
+											<exclude>bin/2.6.1/**</exclude>
+										</excludes>
+									</filter>
+								</filters>
 						</configuration>
 					</execution>
 				</executions>

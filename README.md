@@ -43,6 +43,9 @@ Create a new Input of type **MQTT TCP (Raw/Plaintext)** and fill in the connecti
 | Client ID | Client identifier (leave blank for auto-generated) |
 | Connection timeout (s) | Seconds to wait for the connection to establish |
 | Keep-alive interval (s) | Maximum seconds between keep-alive messages |
+| Max message size (KB) | Largest accepted MQTT message; larger ones are dropped and replaced by a placeholder |
+| Protobuf schema (.proto) | Optional. Paste a `.proto` schema to enable protobuf decoding (see below) |
+| Protobuf topic mapping | Optional. Maps topics to protobuf message types and selects fields to extract (see below) |
 
 ### Message fields
 
@@ -70,6 +73,49 @@ When **MQTT 5.0** is selected, the following fields are also populated if presen
 | `mqtt5_content_type` | MIME content type of the payload |
 | `mqtt5_subscription_identifier` | Subscription identifier |
 | `mqtt5_user_<key>` | One field per user property, named `mqtt5_user_<key>` |
+
+### Protobuf decoding
+
+Payloads encoded with [Protocol Buffers](https://protobuf.dev) (e.g. published with
+`mqtt5_content_type: application/x-protobuf`) can be decoded into readable Graylog messages.
+
+Decoding is enabled per topic through two input fields:
+
+1. **Protobuf schema (.proto)** — paste a self-contained `.proto` schema. It is compiled at runtime
+   (a `protoc` binary is bundled in the plugin) and may declare several message types.
+2. **Protobuf topic mapping** — one line per topic with the grammar:
+
+   ```
+   <topic-filter> = <FullyQualifiedMessageType> : <field1>, <field2>, ...
+   ```
+
+   - The **topic filter** supports the MQTT `+` (single level) and `#` (multi level) wildcards and is
+     matched against the message's actual topic.
+   - The **message type** is the fully-qualified protobuf type (e.g. `com.example.TempReading`).
+   - The optional **field list** (after `:`) selects which fields become Graylog fields. Dotted paths
+     traverse nested messages (`location.room`). If omitted, all top-level scalar fields are extracted.
+
+   Example:
+
+   ```
+   sensors/+/temp = com.example.TempReading : id, celsius, location.room
+   events/#       = com.example.Event       : type
+   ```
+
+When a message's topic matches a mapping, its payload is decoded and:
+
+- the Graylog message body (`message`) is set to the decoded message in protobuf text format;
+- each selected field is added as a Graylog field;
+- if decoding fails (unknown type, bad payload, schema error), the message falls back to the raw
+  payload and a `protobuf_decode_error` field describes the problem.
+
+> **Notes / limitations:**
+> - The schema must be self-contained; custom `import`s of other user `.proto` files are not resolved
+>   (the protobuf well-known types are available).
+> - Compilation extracts and runs a native `protoc` binary, so the Graylog host needs a writable,
+>   exec-capable temp directory. The bundled `protoc` increases the plugin jar size.
+> - Repeated and map fields are extracted as a stringified value in this version; nested scalar paths
+>   are fully supported.
 
 ## Development
 
