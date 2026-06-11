@@ -39,6 +39,7 @@ import com.google.inject.assistedinject.Assisted;
 import com.google.inject.assistedinject.AssistedInject;
 
 import io.netty.handler.codec.mqtt.MqttProperties;
+import io.vertx.core.buffer.Buffer;
 import io.vertx.core.Vertx;
 import io.vertx.mqtt.MqttClient;
 import io.vertx.mqtt.MqttClientOptions;
@@ -59,6 +60,10 @@ public class MQTTTransport implements Transport {
 	private static final String CK_CLEAN_SESSION = "cleanSession";
 	private static final String CK_QOS = "qos";
 	private static final String CK_MQTT_VERSION = "mqttVersion";
+	private static final String CK_MAX_MESSAGE_SIZE = "maxMessageSize";
+
+	/** Default maximum MQTT message size, in KB. */
+	private static final int DEFAULT_MAX_MESSAGE_SIZE_KB = 128;
 
 	/** Stored value for MQTT 3.1.1 (Vert.x protocol level 4) */
 	static final String MQTT_VERSION_311 = "311";
@@ -137,6 +142,7 @@ public class MQTTTransport implements Transport {
 		options.setKeepAliveInterval(configuration.getInt(CK_KEEPALIVE));
 		options.setConnectTimeout(configuration.getInt(CK_TIMEOUT) * 1000);
 		options.setVersion(isMqtt5 ? 5 : 4);
+		options.setMaxMessageSize(configuration.getInt(CK_MAX_MESSAGE_SIZE, DEFAULT_MAX_MESSAGE_SIZE_KB) * 1024);
 		options.setSsl(ssl);
 
 		if (configuration.getBoolean(CK_USE_AUTH)) {
@@ -155,7 +161,7 @@ public class MQTTTransport implements Transport {
 			}
 		});
 
-		client.exceptionHandler(ex -> logger.error("MQTT client error", ex));
+		client.exceptionHandler(this::handleClientException);
 
 		logger.info("Connecting to MQTT broker at {}:{} (MQTT {})...", host, port, isMqtt5 ? "5.0" : "3.1.1");
 
@@ -191,7 +197,9 @@ public class MQTTTransport implements Transport {
 		boolean isMqtt5 = MQTT_VERSION_5.equals(configuration.getString(CK_MQTT_VERSION, MQTT_VERSION_311));
 
 		HashMap<String, Object> m = new HashMap<>();
-		m.put("payload", message.payload().toString(StandardCharsets.UTF_8));
+		Buffer payload = message.payload();
+		m.put("payload",
+				payload == null || payload.length() == 0 ? "" : payload.toString(StandardCharsets.UTF_8));
 		m.put("topic", message.topicName());
 		m.put("qos", message.qosLevel().value());
 		m.put("duplicate", message.isDup());
@@ -208,6 +216,33 @@ public class MQTTTransport implements Transport {
 		logger.debug("Parsed message successfully, message id: <{}>.", rm.getId());
 		messageInput.processRawMessage(rm);
 		processedMessages.mark();
+	}
+
+	private void handleClientException(Throwable ex) {
+		if (isMessageTooLarge(ex)) {
+			logger.warn("Received an MQTT message larger than the configured maximum size; storing a placeholder message.");
+			HashMap<String, Object> m = new HashMap<>();
+			m.put("payload", "MQTT message too large to be saved");
+			RawMessage rm = new RawMessage(SerializationUtils.serialize(m));
+			messageInput.processRawMessage(rm);
+			processedMessages.mark();
+		} else {
+			logger.error("MQTT client error", ex);
+		}
+	}
+
+	/** Detects the Netty decoder failure raised when a message exceeds the configured maximum size. */
+	private static boolean isMessageTooLarge(Throwable ex) {
+		for (Throwable t = ex; t != null; t = t.getCause()) {
+			if (t instanceof io.netty.handler.codec.TooLongFrameException) {
+				return true;
+			}
+			String msg = t.getMessage();
+			if (msg != null && msg.contains("too large message")) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	// MQTT 5.0 property IDs (from MQTT 5.0 spec, same as Netty package-private constants)
@@ -346,6 +381,9 @@ public class MQTTTransport implements Transport {
 
 			cr.addField(new NumberField(CK_KEEPALIVE, "Keep-alive interval (s)", 30,
 					"Maximum seconds between keep-alive messages."));
+
+			cr.addField(new NumberField(CK_MAX_MESSAGE_SIZE, "Max message size (KB)", DEFAULT_MAX_MESSAGE_SIZE_KB,
+					"Maximum accepted MQTT message size in KB. Larger messages are dropped and replaced by a placeholder message."));
 
 			return cr;
 		}

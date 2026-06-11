@@ -2,6 +2,7 @@ package it.osys.graylog;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 import org.apache.commons.lang3.SerializationUtils;
 import org.graylog2.plugin.Message;
@@ -36,7 +37,13 @@ public class MQTTRawCodec extends AbstractCodec {
 
 		HashMap<String, Object> m = (HashMap<String, Object>) SerializationUtils.deserialize(rawMessage.getPayload());
 
-		Message message = messageFactory.createMessage((String) m.get("payload"), "MQTT source", rawMessage.getTimestamp());
+		String payloadStr = m.get("payload") instanceof String s ? s : "";
+		// Graylog ignores or drops events with an empty full_message; keep empty MQTT publishes visible.
+		String messageText = payloadStr.isEmpty()
+				? "[empty MQTT payload]"
+				: payloadStr;
+
+		Message message = messageFactory.createMessage(messageText, "MQTT source", rawMessage.getTimestamp());
 		message.addField("topic", m.get("topic"));
 		message.addField("qos", m.get("qos"));
 		message.addField("mqttmessageid", m.get("mqttmessageid"));
