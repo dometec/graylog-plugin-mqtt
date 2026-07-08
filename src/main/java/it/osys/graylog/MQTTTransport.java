@@ -39,6 +39,10 @@ import com.google.inject.assistedinject.Assisted;
 import com.google.inject.assistedinject.AssistedInject;
 
 import io.netty.handler.codec.mqtt.MqttProperties;
+import io.netty.handler.codec.mqtt.MqttQoS;
+import io.netty.handler.codec.mqtt.MqttSubscriptionOption;
+import io.netty.handler.codec.mqtt.MqttSubscriptionOption.RetainedHandlingPolicy;
+import io.netty.handler.codec.mqtt.MqttTopicSubscription;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.Vertx;
 import io.vertx.mqtt.MqttClient;
@@ -182,9 +186,16 @@ public class MQTTTransport implements Transport {
 		int qos = configuration.getInt(CK_QOS);
 		Iterable<String> topics = Splitter.on(',').omitEmptyStrings().trimResults().split(configuration.getString(CK_TOPICS));
 
+		// Retain Handling = 2 (DONT_SEND_AT_SUBSCRIBE): don't deliver retained messages on subscribe.
+		// Only honoured on MQTT 5.0; on 3.1.1 the option bits are not encoded and retained messages
+		// are still delivered by the broker.
+		MqttSubscriptionOption option = new MqttSubscriptionOption(MqttQoS.valueOf(qos), false, false,
+				RetainedHandlingPolicy.DONT_SEND_AT_SUBSCRIBE);
+
 		for (String topic : topics) {
-			logger.info("Subscribing to topic {} with QoS {}...", topic, qos);
-			client.subscribe(topic, qos)
+			logger.info("Subscribing to topic {} with QoS {} (retained messages suppressed)...", topic, qos);
+			MqttTopicSubscription subscription = new MqttTopicSubscription(topic, option);
+			client.subscribe(List.of(subscription), MqttProperties.NO_PROPERTIES)
 					.onSuccess(v -> logger.info("Subscribed to topic {}.", topic))
 					.onFailure(ex -> logger.error("Failed to subscribe to topic {}.", topic, ex));
 		}
