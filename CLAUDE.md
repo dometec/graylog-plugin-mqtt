@@ -43,7 +43,7 @@ Graylog discovers the plugin via `META-INF/services/org.graylog2.plugin.Plugin` 
 ### The Transport ↔ Codec contract (most important detail)
 The two halves are coupled by an implicit data format, not a typed interface:
 
-1. `MQTTTransport.onMessageArrived` builds a `HashMap<String,Object>` (keys: `payload` (UTF-8 string), `payloadBytes` (raw `byte[]`, for binary-safe protobuf decoding), `topic`, `qos`, `duplicate`, `retained`, plus `mqtt5_*` for MQTT 5.0), **Java-serializes it** via `SerializationUtils.serialize(...)`, and hands the bytes to `messageInput.processRawMessage(new RawMessage(...))`.
+1. `MQTTTransport.onMessageArrived` builds a `HashMap<String,Object>` (keys: `payload` (UTF-8 string; non-UTF-8/binary payloads are stored as their hex representation), `payloadBytes` (raw `byte[]`, for binary-safe protobuf decoding), `topic`, `qos`, `duplicate`, `retained`, plus `mqtt5_*` for MQTT 5.0), **Java-serializes it** via `SerializationUtils.serialize(...)`, and hands the bytes to `messageInput.processRawMessage(new RawMessage(...))`.
 2. `MQTTRawCodec.decode` **deserializes that same HashMap** and maps each key onto Graylog `Message` fields (`payload` → message body; `mqtt5_user_properties` nested map → flattened `mqtt5_user_<key>` fields).
 
 **Consequence:** any field added/renamed in the transport's map must be read by the codec, and vice versa. Both sides must stay on the same serialization format. The MQTT-5 property IDs in the transport are hard-coded ints mirroring the (package-private) Netty MQTT constants.

@@ -53,7 +53,7 @@ Every received message produces the following Graylog fields:
 
 | Field | Description |
 |---|---|
-| `message` | Raw payload of the MQTT message (UTF-8 decoded) |
+| `message` | Raw payload of the MQTT message (UTF-8 decoded; binary payloads are stored as their hex representation) |
 | `topic` | MQTT topic the message was received on |
 | `qos` | QoS level of the message (0, 1, or 2) |
 | `duplicate` | Whether this is a duplicate delivery |

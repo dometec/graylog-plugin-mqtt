@@ -32,7 +32,7 @@
 
 	<groupId>it.osys.graylog</groupId>
 	<artifactId>graylog-plugin-mqtt</artifactId>
-	<version>4.1.2</version>
+	<version>4.1.4</version>
 	<packaging>jar</packaging>
 
 	<name>${project.artifactId}</name>
@@ -65,7 +65,23 @@
 
 		<graylog.version>${project.parent.version}</graylog.version>
 		<graylog.plugin-dir>/usr/share/graylog-server/plugin</graylog.plugin-dir>
+
 	</properties>
+
+	<dependencyManagement>
+		<dependencies>
+			<!-- Locally-built netty-codec-mqtt with MqttDecoder fixes (oversize bail-out,
+			     strict UTF-8 validation, MQTT 5 properties length decoding). Built from
+			     ~/git/OpenSource/netty and required in ~/.m2/repository, like the vertx
+			     5.1.0-SNAPSHOT artifacts. The other Netty modules stay on the version
+			     pulled in transitively. -->
+			<dependency>
+				<groupId>io.netty</groupId>
+				<artifactId>netty-codec-mqtt</artifactId>
+				<version>4.2.17.Final-SNAPSHOT</version>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 
 	<distributionManagement>
 		<snapshotRepository>

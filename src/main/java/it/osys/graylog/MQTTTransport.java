@@ -4,9 +4,13 @@ import static com.codahale.metrics.MetricRegistry.name;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -209,10 +213,10 @@ public class MQTTTransport implements Transport {
 
 		HashMap<String, Object> m = new HashMap<>();
 		Buffer payload = message.payload();
-		m.put("payload",
-				payload == null || payload.length() == 0 ? "" : payload.toString(StandardCharsets.UTF_8));
+		byte[] payloadBytes = payload == null ? null : payload.getBytes();
+		m.put("payload", payloadToString(payloadBytes));
 		// Raw bytes preserved for binary-safe decoding (e.g. protobuf) in the codec.
-		m.put("payloadBytes", payload == null ? null : payload.getBytes());
+		m.put("payloadBytes", payloadBytes);
 		m.put("topic", message.topicName());
 		m.put("qos", message.qosLevel().value());
 		m.put("duplicate", message.isDup());
@@ -229,6 +233,25 @@ public class MQTTTransport implements Transport {
 		logger.debug("Parsed message successfully, message id: <{}>.", rm.getId());
 		messageInput.processRawMessage(rm);
 		processedMessages.mark();
+	}
+
+	/**
+	 * Renders the payload as UTF-8 text; binary payloads (not valid UTF-8) are stored as their
+	 * hex representation so they stay readable and searchable in Graylog.
+	 */
+	static String payloadToString(byte[] payload) {
+		if (payload == null || payload.length == 0) {
+			return "";
+		}
+		try {
+			return StandardCharsets.UTF_8.newDecoder()
+					.onMalformedInput(CodingErrorAction.REPORT)
+					.onUnmappableCharacter(CodingErrorAction.REPORT)
+					.decode(ByteBuffer.wrap(payload))
+					.toString();
+		} catch (CharacterCodingException e) {
+			return HexFormat.of().formatHex(payload);
+		}
 	}
 
 	private void handleClientException(Throwable ex) {
